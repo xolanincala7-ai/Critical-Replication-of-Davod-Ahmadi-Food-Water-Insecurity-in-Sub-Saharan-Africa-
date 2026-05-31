@@ -34,4 +34,4 @@ My improved regression revealed clearer, more robust associations, showing how m
 
 Replication exposed coding errors in the original study, strengthening the case for transparency and reproducibility in development research.
 
-**Please read this project (.pdf file)** — it represents the passion and rigour of my Master of Arts in E‑Science journey, where I use data science not just to replicate, but to push the boundaries of knowledge in food and water insecurity research.
+**Please read this project (.pdf file)** — it represents the passion and rigour of my Master of Arts in E‑Science journey, where I use data science methods not just to replicate, but to push the boundaries of knowledge in food and water insecurity research.
