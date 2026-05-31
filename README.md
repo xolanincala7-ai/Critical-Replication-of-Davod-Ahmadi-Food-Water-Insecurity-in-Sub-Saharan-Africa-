@@ -8,7 +8,7 @@ Part of my MA‑E‑Science portfolio — please read this project (.pdf file)
 This project is my strongest replication study, critically re‑examining Davod Ahmadi’s (2019) analysis of the relationship between food insecurity and water insecurity across 32 Sub‑Saharan African countries. Using Afrobarometer Round 6 survey data (2016) and replicating the author’s statistical models in RStudio, I not only reproduced the original findings but also improved the methodology by applying ordinal logistic regression — a more appropriate model for the ordinal nature of the data.
 
 # Project Preview 
-Screenshot: 
+Screenshot: https://github.com/xolanincala7-ai/Critical-Replication-of-Davod-Ahmadi-Food-Water-Insecurity-in-Sub-Saharan-Africa-/blob/main/replication.screenshot.png
 
 
 # Data Source
