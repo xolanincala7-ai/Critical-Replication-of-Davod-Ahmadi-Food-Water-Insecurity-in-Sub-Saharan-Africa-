@@ -1,0 +1,1236 @@
+---
+title: "Replication Paper Coding"
+author: "Xolani Ncala"
+date: "2025-10-31"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.width = 14, fig.height = 10, out.width = "100%")
+```
+
+
+```{r, libsload, warning=FALSE, message=FALSE}
+# 1. Core tidyverse tools (load first to establish base verbs)
+library(tidyverse)  # Includes ggplot2, dplyr, tidyr, readr, purrr, tibble, stringr
+
+# 2. Data import and harmonization
+library(haven)       # For .sav files
+library(countrycode) # For country code harmonization
+
+# 3. Modeling and statistical tools
+library(MASS)        # For polr (ordinal regression)
+library(nnet)        # For multinomial logistic regression
+library(car)         # For recoding, VIF, etc.
+library(vcd)         # For categorical data visualization
+
+# 4. Table formatting and reporting
+library(broom)       # For tidying model outputs
+library(knitr)       # For markdown tables
+library(kableExtra)  # For enhanced table styling
+
+
+# 5. Visualization (already loaded via tidyverse, but reloading if needed)
+library(ggplot2)
+
+
+##SOME PACKAKEGES ARE RELOADED IN SUCCESSSIVE CHUNKS TO AVOID PACKAGE CONCFLICT##
+
+```
+
+
+```{r, dtload}
+
+#Loading the .sav file into data frame 
+Afrobaro.Roun6.Data <- read_sav("Afr.roun6.data.36coun.sav", encoding = "latin1") 
+
+# Loading the .csv file into data frame
+GDP <- read.csv("GDP.PPP.csv", skip = 3, sep = ",")
+```
+
+### This is a replication for table 1. 
+
+```{r, dt1load}
+
+#Loading the .sav file into data frame 
+Afrobaro.Roun6.Data <- read_sav("Afr.roun6.data.36coun.sav", encoding = "latin1") 
+
+# Loading the .csv file into data frame
+GDP <- read.csv("GDP.PPP.csv", skip = 3, sep = ",")
+```
+
+```{r, Table1, warning=FALSE, message=FALSE}
+# Step 1: Convert labelled COUNTRY to character and move to front
+Afrobaro.Roun6.Data <- Afrobaro.Roun6.Data |>
+  mutate(COUNTRY_NAME = as.character(as_factor(COUNTRY))) |>
+  relocate(COUNTRY_NAME)
+
+# This is fixing the Sao Tome Principe country name 
+Afrobaro.Roun6.Data <- Afrobaro.Roun6.Data |>
+  mutate(COUNTRY_NAME = str_replace(COUNTRY_NAME, "S.*Tom.*Pr.*ncipe", "Sao Tome and Principe"))
+
+
+# Step 2: Define and clean country list to select our 32 African countries 
+selected_countries <- c(
+  "Cape Verde", "Mauritius", "South Africa", "Botswana", "Namibia", "Gabon", "Zambia",
+  "Ghana", "Nigeria", "Swaziland", "Senegal", "Tanzania", "Guinea", "Cote d'Ivoire",
+  "Zimbabwe", "Kenya", "Cameroon", "Benin", "Lesotho", "Mali", "Sudan", "Burkina Faso",
+  "Togo", "Sierra Leone", "Uganda", "Madagascar", "Niger", "Mozambique", "Malawi",
+  "Sao Tome and Principe", "Liberia", "Burundi"
+)
+
+Afr_roun6_subset32 <- Afrobaro.Roun6.Data |>
+  filter(COUNTRY_NAME %in% selected_countries)
+
+
+
+# Step 3:  We attach ISO3 codes to the Afrobarometer Data and then we count sample sizes 
+country_codes <- tibble(
+  COUNTRY_NAME = selected_countries,
+  ISO3 = countrycode(selected_countries, origin = "country.name", destination = "iso3c")
+)
+
+country_counts <- Afr_roun6_subset32 |>
+  count(COUNTRY_NAME, name = "n") |>
+  left_join(country_codes, by = "COUNTRY_NAME") |>
+  arrange(desc(n)) 
+
+
+
+
+# Step 4: Merge GDP into country_codes
+GDP <- GDP |>
+  mutate(ISO3 = countrycode(Country.Name, origin = "country.name", destination = "iso3c"))
+
+country_codes_gdp <- country_codes |>
+  left_join(GDP, by = "ISO3")
+
+# then we Attach ISO3 to Afrobarometer subset
+Afr_roun6_subset32 <- Afr_roun6_subset32 |>
+  left_join(country_codes, by = "COUNTRY_NAME")
+
+# then we Merge GDP into Afrobarometer subset using ISO3
+Afr_roun6_with_GDP <- Afr_roun6_subset32 |>
+  left_join(dplyr::select(GDP, ISO3, Country.Name, X2018), by = "ISO3")
+
+
+
+
+# Step 5: The Grouping of the contries under GDP PPP
+
+AFB.ROUND.6 <- Afr_roun6_with_GDP |>
+  dplyr::select(
+    COUNTRY_NAME, ISO3, X2018, RESPNO, URBRUR, Q101, Q1, Q97, Q95,
+    Q8E, EA_SVC_A, Q8B, Q8C, Q91A, Q91B, Q91C, Q91D
+  ) |>
+  dplyr::rename(
+    country = COUNTRY_NAME,
+    code = ISO3,
+    gdp.ppp = X2018,
+    resp.no = RESPNO,
+    res.area = URBRUR,
+    sex = Q101,
+    Age = Q1,
+    education = Q97,
+    employment.status = Q95,
+    income.available = Q8E,
+    electricity = EA_SVC_A,
+    water.insecurity = Q8B,
+    food.insecurity = Q8C,
+    radio = Q91A,
+    tv = Q91B,
+    car.or.bike = Q91C,
+    phone = Q91D
+  )
+
+
+#  Step 6: Creating the GDP.PPP groups 
+
+AFB.ROUND.6<- AFB.ROUND.6 |>
+  mutate(GDP_PPP_Group = case_when(
+    gdp.ppp>= 4000 ~ "GDP PPP (\\$4,000 and more )",
+    gdp.ppp >= 2000 ~ "GDP PPP (\\$2,000 to \\$3,999)",
+    gdp.ppp >= 1500 ~ "GDP PPP (\\$1,500 to \\$1,999)",
+    gdp.ppp< 1500 ~ "GDP PPP (Less than \\$1,500)",
+    TRUE ~ "Unknown"
+  ))
+
+
+# Step 7: Summarize sample sizes by country and gdp.ppp bracket
+table1 <- AFB.ROUND.6|>
+  count(GDP_PPP_Group, country, gdp.ppp, name = "Sample_Size") |>
+  arrange(GDP_PPP_Group, desc(Sample_Size))
+
+
+
+#  Step 8: We Prepare the table
+
+# Step 1: Sort by descending GDP PPP
+table1_sorted <- table1 |>
+  arrange(desc(gdp.ppp)) |>
+  dplyr::select(
+    Country = country,
+    `GDP PPP (2018) \\$` = gdp.ppp,
+    `Sample Size` = Sample_Size,
+    Group = GDP_PPP_Group
+  )
+
+
+# Step 2: Render with grouped rows
+table1_sorted |>
+  kable(format = "html", caption = "Table 1. Sample size of studied countries in SSA (n = 49,137)", align = "lccr") |>
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover")) |>
+  collapse_rows(columns = 4, valign = "top")
+
+```
+
+
+
+
+```{r, Table1_TeX, warning=FALSE, message=FALSE}
+
+
+library(dplyr)
+library(knitr)
+library(kableExtra)
+library(stringr)
+# Make sure your GDP_PPP_Group variable has proper labels
+AFB.ROUND.6 <- AFB.ROUND.6 |>
+  mutate(GDP_PPP_Group = case_when(
+    gdp.ppp >= 4000 ~ "GDP PPP ($4,000 and more)",
+    gdp.ppp >= 2000 & gdp.ppp < 4000 ~ "GDP PPP ($2,000 to $3,999)",
+    gdp.ppp >= 1500 & gdp.ppp < 2000 ~ "GDP PPP ($1,500 to $1,999)",
+    TRUE ~ "GDP PPP (Less than $1,500)"
+  ))
+
+# Summarize and order
+table1_tex <- AFB.ROUND.6 |>
+  count(GDP_PPP_Group, country, gdp.ppp, name = "Sample_Size") |>
+  mutate(GDP_PPP_Group = factor(
+    GDP_PPP_Group,
+    levels = c(
+      "GDP PPP ($4,000 and more)",
+      "GDP PPP ($2,000 to $3,999)",
+      "GDP PPP ($1,500 to $1,999)",
+      "GDP PPP (Less than $1,500)"
+    )
+  )) |>
+  arrange(GDP_PPP_Group, desc(gdp.ppp)) |>
+  dplyr::select(
+    `GDP PPP Group` = GDP_PPP_Group,
+    Country = country,
+    `GDP PPP (2018, $)` = gdp.ppp,
+    `Sample Size` = Sample_Size
+  )
+
+
+
+# Generate clean LaTeX table
+latex_table <- table1_tex |>
+  kable(
+    format = "latex",
+    booktabs = TRUE,
+    align = "llcc",
+    caption = "Sample size of studied countries in sub-Saharan Africa (n = 49,137)"
+  ) |>
+  kable_styling(latex_options = c("hold_position")) |>
+  collapse_rows(columns = 1, valign = "middle")
+
+# Save LaTeX code to a file
+cat(latex_table, file = "Table1_SSA_SampleSize_Clean.tex")
+
+```
+
+
+### This is replication for table 2
+
+```{r, tab2, message=FALSE, warning=FALSE}
+
+#This section we are recoding all the variables to be how Ahmadi used them 
+
+# step1 start with res.area recoding to urban and rural only 
+
+AFB.ROUND.6 <- AFB.ROUND.6 |>
+  mutate(
+    res.area = case_when(
+      res.area == 1 ~ 0,
+      res.area == 2 ~ 1,
+      res.area == 3 ~ 0,
+      res.area == 460 ~ 0,
+      TRUE ~ NA_real_
+    ),
+    res.area = factor(res.area, levels = c(0, 1), labels = c("Urban", "Rural")),
+                            #recoding gender/sex
+    sex = case_when(
+      sex == -1 ~ NA_real_,      
+      sex == 1 ~ 0,
+      sex == 2 ~ 1,
+      TRUE ~ NA_real_
+    ),
+    sex = factor(sex, levels = c(0, 1), labels = c("Male", "Female")),
+                            #recoding Age 
+    Age = case_when(
+      Age %in% c(-1, 98, 999) ~ NA_real_,
+      Age >= 18 & Age <= 25 ~ 0,
+      Age >= 26 & Age <= 35 ~ 1,
+      Age >= 36 & Age <= 45 ~ 2,
+      Age >= 46 & Age <= 55 ~ 3,
+      Age >= 56 & Age <= 65 ~ 4,
+      Age >= 66 ~ 5,
+      TRUE ~ NA_real_
+    ),
+    Age = factor(Age, levels = 0:5,
+                 labels = c("18–25", "26–35", "36–45", "46–55", "56–65", "66 and over")),
+                                      #recoding education
+    education = case_when(
+      education %in% c(-1, 98, 99) ~ NA_real_,
+      education %in% c(0, 1) ~ 0,
+      education %in% c(2, 3) ~ 1,
+      education %in% c(4, 5) ~ 2,
+      education %in% c(6, 7, 8, 9) ~ 3,
+      TRUE ~ NA_real_
+    ),
+    education = factor(education, levels = 0:3,
+                       labels = c("No formal education", "Primary", "Secondary", "Post-secondary")),
+                                          #rec emplyment
+    employment.status = case_when(
+      employment.status %in% c(-1, 9, 98) ~ NA_real_,
+      employment.status %in% c(0, 1) ~ 0,
+      employment.status == 2 ~ 1,
+      employment.status == 3 ~ 2,
+      TRUE ~ NA_real_
+    ),
+    employment.status = factor(employment.status,
+                               levels = 0:2,
+                               labels = c("Unemployed", "Employed part-time", "Employed full-time")),
+                                    #rec Income
+    income.available = case_when(
+      income.available %in% c(-1, 9, 98) ~ NA_real_,
+      income.available == 0 ~ 0,
+      income.available == 1 ~ 1,
+      income.available == 2 ~ 2,
+      income.available == 3 ~ 3,
+      income.available == 4 ~ 4,
+      TRUE ~ NA_real_
+    ),
+    income.available = factor(income.available, levels = 0:4,
+                              labels = c("Never", "Just once or twice", "Several times", "Many times", "Always")),
+                                  #recoding electricity
+    electricity = case_when(
+      electricity %in% c(-1, 9) ~ NA_real_,
+      electricity == 0 ~ 0,
+      electricity == 1 ~ 1,
+      TRUE ~ NA_real_
+    ),
+    electricity = factor(electricity, levels = c(0, 1), labels = c("No", "Yes")),
+                                #recoding water 
+    water.insecurity = case_when(
+      water.insecurity %in% c(-1, 9, 98) ~ NA_real_,
+      water.insecurity == 0 ~ 0,
+      water.insecurity == 1 ~ 1,
+      water.insecurity == 2 ~ 2,
+      water.insecurity == 3 ~ 3,
+      water.insecurity == 4 ~ 4,
+      TRUE ~ NA_real_
+    ),
+    water.insecurity = factor(water.insecurity, levels = 0:4,
+                              labels = c("Never", "Just once or twice", "Several times", "Many times", "Always")),
+                                #recoding food 
+    food.insecurity = case_when(
+      food.insecurity %in% c(-1, 9, 98) ~ NA_real_,
+      food.insecurity == 0 ~ 0,
+      food.insecurity == 1 ~ 1,
+      food.insecurity == 2 ~ 2,
+      food.insecurity == 3 ~ 3,
+      food.insecurity == 4 ~ 4,
+      TRUE ~ NA_real_
+    ),
+    food.insecurity = factor(food.insecurity, levels = 0:4,
+                             labels = c("Never", "Just once or twice", "Several times", "Many times", "Always")))
+    
+  AFB.ROUND.6 <- AFB.ROUND.6 |>
+  mutate(
+    radio = ifelse(radio %in% c(-1, 9, 98), NA_real_, radio),
+    tv = ifelse(tv %in% c(-1, 9, 98), NA_real_, tv),
+    car.or.bike = ifelse(car.or.bike %in% c(-1, 9, 98), NA_real_, car.or.bike),
+    phone = ifelse(phone %in% c(-1, 9, 98), NA_real_, phone)
+  )
+                              #recoding asset score
+AFB.ROUND.6 <- AFB.ROUND.6 |>
+  mutate(
+    asset_ownership_raw = rowSums(dplyr::select(AFB.ROUND.6, radio, tv, car.or.bike, phone), na.rm = TRUE),
+    asset_ownership = case_when(
+      asset_ownership_raw == 4 ~ "Owns all 4",
+      asset_ownership_raw == 3 ~ "Owns 3",
+      asset_ownership_raw == 2 ~ "Owns 2",
+      asset_ownership_raw == 1 ~ "Owns 1",
+      asset_ownership_raw == 0 ~ "Owns none",
+      TRUE ~ NA_character_
+    ),
+    asset_ownership = factor(asset_ownership,
+                             levels = c("Owns all 4", "Owns 3", "Owns 2", "Owns 1", "Owns none"))
+  )
+
+
+
+# Variables to summarize
+vars <- c("res.area", "sex", "Age", "education", "employment.status",
+          "income.available", "electricity", "water.insecurity",
+          "food.insecurity", "asset_ownership")
+
+# Summarize function
+summarize_variable <- function(df, var) {
+  df %>%
+    filter(!is.na(.data[[var]])) %>%
+    count(!!sym(var), name = "Frequency") %>%
+    mutate(
+      Percent = round(100 * Frequency / sum(Frequency), 1),
+      Variable = var,
+      Category = as.character(!!sym(var))
+    ) %>%
+    dplyr::select(Variable, Category, Frequency, Percent)
+}
+
+# Build table
+table2 <- bind_rows(lapply(vars, function(v) summarize_variable(AFB.ROUND.6, v)))
+
+# Make variable names readable
+table2 <- table2 %>%
+  mutate(Variable = case_when(
+    Variable == "res.area" ~ "Area of residence",
+    Variable == "sex" ~ "Sex",
+    Variable == "Age" ~ "Age group",
+    Variable == "education" ~ "Education",
+    Variable == "employment.status" ~ "Employment",
+    Variable == "income.available" ~ "Income availability",
+    Variable == "electricity" ~ "Electricity access",
+    Variable == "water.insecurity" ~ "Water insecurity",
+    Variable == "food.insecurity" ~ "Food insecurity",
+    Variable == "asset_ownership" ~ "Asset ownership",
+    TRUE ~ Variable
+  ))
+
+# Create LaTeX table with multirow for variables
+latex_table2 <- table2 %>%
+  kable(
+    format = "latex",
+    booktabs = TRUE,
+    caption = "Characteristics of respondents (n = 49,137)",
+    col.names = c("Variable", "Category", "Frequency", "Percent"),
+    align = c("l", "l", "c", "c"),
+    linesep = ""
+  ) %>%
+  kable_styling(latex_options = c("hold_position")) %>%
+  collapse_rows(columns = 1, valign = "top") %>%  # Collapse Variable names
+  row_spec(0, bold = TRUE)                        # Bold header row
+
+# Wrap the whole table in \small
+latex_table2 <- paste0("\\small\n", latex_table2)
+
+# Save LaTeX table
+cat(latex_table2, file = "Table2_SSA_Characteristics2.tex")
+
+
+print(table2, row.names = TRUE)
+
+```
+
+### Now recreating Figure 1 of the article 
+
+```{r, fig1, message=FALSE, warning=FALSE}
+
+Afr_roun6_with_GDP <- Afr_roun6_with_GDP %>%
+  mutate(
+    food.insecurity = case_when(
+      Q8A %in% c(0:4) ~ as.character(Q8A),
+      Q8A %in% c(-1, 9, 98) ~ NA_character_
+    ),
+    water.insecurity = case_when(
+      Q8B %in% c(0:4) ~ as.character(Q8B),
+      Q8B %in% c(-1, 9, 98) ~ NA_character_
+    ),
+    # Label the levels for readability
+    food.insecurity = factor(food.insecurity,
+                             levels = c("0", "1", "2", "3", "4"),
+                             labels = c("Never", "Just once or twice", "Several times", "Many times", "Always")),
+    water.insecurity = factor(water.insecurity,
+                              levels = c("0", "1", "2", "3", "4"),
+                              labels = c("Never", "Just once or twice", "Several times", "Many times", "Always"))
+  )
+
+
+# Get list of countries
+countries <- unique(Afr_roun6_with_GDP$COUNTRY_NAME)
+
+# Initialize empty dataframe for results
+country_secure <- data.frame()
+
+# Loop through each country
+for (c in countries) {
+  
+  # Subset country
+  subset_data <- Afr_roun6_with_GDP %>% filter(COUNTRY_NAME == c)
+  
+  # Remove NAs within this country
+  food_valid <- subset_data %>% filter(!is.na(food.insecurity))
+  water_valid <- subset_data %>% filter(!is.na(water.insecurity))
+  
+  # Calculate percentages of "Never"
+  food_pct <- mean(food_valid$food.insecurity == "Never") * 100
+  water_pct <- mean(water_valid$water.insecurity == "Never") * 100
+  
+  # Combine into dataframe
+  country_secure <- rbind(country_secure,
+                          data.frame(COUNTRY_NAME = c,
+                                     food_secure = food_pct,
+                                     water_secure = water_pct))
+}
+
+# Convert to long format for plotting
+country_secure_long <- country_secure %>%
+  tidyr::pivot_longer(
+    cols = c(food_secure, water_secure),
+    names_to = "Type",
+    values_to = "Percent"
+  )
+
+# Use the per-country dataset we created
+fig1_plot <- ggplot(country_secure_long, aes(x = reorder(COUNTRY_NAME, Percent), y = Percent, fill = Type)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.9), width = 0.8) +
+  geom_text(aes(label = sprintf("%.1f", Percent)),
+            position = position_dodge(width = 0.9),
+            hjust = -0.1, size = 3.2) +
+  coord_flip() +
+  labs(
+    x = "Country",
+    y = "Percentage (%)",
+    fill = ""
+  ) +
+  scale_fill_manual(values = c("food_secure" = "lightgreen", "water_secure" = "darkblue"),
+                    labels = c("Food secure", "Water secure")) +
+  scale_y_continuous(limits = c(0, 105)) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.y = element_text(size = 10),
+    axis.text.x = element_text(size = 10),
+    legend.position = "bottom",
+    plot.margin = margin(t = 20, r = 20, b = 20, l = 20)
+  )
+
+ggsave("Figure1_Food_Water_Security.pdf", plot = fig1_plot, width = 12, height = 8, units = "in")
+
+fig1_plot
+```
+
+### Now replicating the bivariate statistics table
+
+
+```{r, tab3, message=FALSE, warning=FALSE}
+
+#1. Recoding variables 
+
+Afr_roun6_with_GDP <- Afr_roun6_with_GDP %>%
+  mutate(
+    # 
+    # Food & water insecurity
+    # 
+    food.insecurity = case_when(Q8A %in% 0:4 ~ as.character(Q8A), TRUE ~ NA_character_),
+    water.insecurity = case_when(Q8B %in% 0:4 ~ as.character(Q8B), TRUE ~ NA_character_),
+    food.insecurity = factor(food.insecurity,
+                             levels = c("0", "1", "2", "3", "4"),
+                             labels = c("Never", "Just once or twice", "Several times", "Many times", "Always")),
+    water.insecurity = factor(water.insecurity,
+                              levels = c("0", "1", "2", "3", "4"),
+                              labels = c("Never", "Just once or twice", "Several times", "Many times", "Always")),
+
+    # 
+    # Gender
+    # 
+    gender = factor(case_when(
+      Q101 == 1 ~ 0,
+      Q101 == 2 ~ 1,
+      TRUE ~ NA_real_
+    ),
+    levels = 0:1,
+    labels = c("Male", "Female")),
+
+    # 
+    # Urban / Rural
+    #
+    urban_rural = factor(case_when(
+      URBRUR == 1 ~ 0,
+      URBRUR == 2 ~ 1,
+      TRUE ~ NA_real_
+    ),
+    levels = 0:1,
+    labels = c("Urban", "Rural")),
+
+    # 
+    # Employment status
+    # 
+    employment = factor(case_when(
+      Q95 %in% c(-1, 9, 98) ~ NA_real_,
+      Q95 == 2 ~ 1,
+      Q95 %in% c(0, 1) ~ 0,
+      Q95 == 3 ~ 2,
+      TRUE ~ NA_real_
+    ),
+    levels = 0:2,
+    labels = c("Unemployed", "Employed part-time", "Employed full-time")),
+
+    # 
+    # Education level
+    # 
+    education = factor(case_when(
+      Q97 %in% c(-1, 98, 99) ~ NA_real_,
+      Q97 %in% c(0, 1) ~ 0,
+      Q97 %in% c(2, 3) ~ 1,
+      Q97 %in% c(4, 5) ~ 2,
+      Q97 %in% c(6, 7, 8, 9) ~ 3,
+      TRUE ~ NA_real_
+    ),
+    levels = 0:3,
+    labels = c("No formal education", "Primary", "Secondary", "Post-secondary")),
+
+    # 
+    # Age group
+    # 
+    age_group = factor(case_when(
+      Q1 >= 18 & Q1 <= 25 ~ 0,
+      Q1 >= 26 & Q1 <= 35 ~ 1,
+      Q1 >= 36 & Q1 <= 45 ~ 2,
+      Q1 >= 46 & Q1 <= 55 ~ 3,
+      Q1 >= 56 & Q1 <= 65 ~ 4,
+      Q1 >= 66 ~ 5,
+      TRUE ~ NA_real_
+    ),
+    levels = 0:5,
+    labels = c("18–25", "26–35", "36–45", "46–55", "56–65", "66 and over")),
+
+    # 
+    # Income availability
+    # 
+    income_available = factor(case_when(
+      Q8E %in% 0:4 ~ Q8E,
+      TRUE ~ NA_real_
+    ),
+    levels = 0:4,
+    labels = c("Never", "Just once or twice", "Several times", "Many times", "Always")),
+
+    # 
+    # Electricity access
+    # 
+    electricity = factor(case_when(
+      EA_SVC_A %in% c(-1, 9) ~ NA_real_,
+      EA_SVC_A == 0 ~ 0,
+      EA_SVC_A == 1 ~ 1,
+      TRUE ~ NA_real_
+    ),
+    levels = 0:1,
+    labels = c("No electricity", "Has electricity"))
+  )
+
+# 
+# Individual asset indicators
+# 
+Afr_roun6_with_GDP <- Afr_roun6_with_GDP %>%
+  mutate(
+    radio = case_when(Q91A %in% 0:1 ~ Q91A,
+                      Q91A %in% c(-1, 9, 98) ~ NA_real_),
+    tv = case_when(Q91B %in% 0:1 ~ Q91B,
+                   Q91B %in% c(-1, 9, 98) ~ NA_real_),
+    car_or_bike = case_when(Q91C %in% 0:1 ~ Q91C,
+                            Q91C %in% c(-1, 9, 98) ~ NA_real_),
+    phone = case_when(Q91D %in% 0:1 ~ Q91D,
+                      Q91D %in% c(-1, 9, 98) ~ NA_real_)
+  )
+
+# 
+# Asset ownership summary
+# 
+Afr_roun6_with_GDP <- Afr_roun6_with_GDP %>%
+  mutate(
+    asset_ownership_raw = rowSums(dplyr::select(., radio, tv, car_or_bike, phone), na.rm = TRUE),
+    asset_ownership = factor(case_when(
+      asset_ownership_raw == 0 ~ "Owns none",
+      asset_ownership_raw == 1 ~ "Owns 1",
+      asset_ownership_raw == 2 ~ "Owns 2",
+      asset_ownership_raw == 3 ~ "Owns 3",
+      asset_ownership_raw == 4 ~ "Owns all 4",
+      TRUE ~ NA_character_
+    ),
+    levels = c("Owns none", "Owns 1", "Owns 2", "Owns 3", "Owns all 4"))
+  )
+
+
+# 
+# 2 Computing Spearman correlations
+# 
+
+compute_spearman <- function(var1, var2, df){
+  df_sub <- df %>% dplyr::select({{var1}}, all_of(var2)) %>% drop_na()
+  cor.test(as.numeric(df_sub[[1]]),
+           as.numeric(df_sub[[2]]),
+           method = "spearman", exact = FALSE)
+}
+
+# List of variables to correlate with food insecurity
+vars_to_test <- c("water.insecurity", "gender", "age_group", "urban_rural",
+                  "education", "employment", "income_available", "electricity", "asset_ownership")
+
+# Corresponding labels for display
+labels <- c("Water insecurity", "Gender", "Age group", "Area of residence",
+            "Education", "Employment", "Income availability", "Electricity", "Asset ownership")
+
+# Compute results safely and track valid variables through loop
+valid_results <- list()
+valid_labels <- c()
+
+for (i in seq_along(vars_to_test)) {
+  var <- vars_to_test[i]
+  label <- labels[i]
+  if (var %in% names(Afr_roun6_with_GDP)) {
+    result <- tryCatch({
+      compute_spearman(food.insecurity, var, Afr_roun6_with_GDP)
+    }, error = function(e) NULL)
+    if (!is.null(result)) {
+      valid_results[[length(valid_results) + 1]] <- result
+      valid_labels <- c(valid_labels, label)
+    }
+  } else {
+    warning(paste("Variable not found:", var))
+  }
+}
+
+# 
+# 3 Combine results into a table
+# 
+
+table3 <- tibble(
+  Variable = valid_labels,
+  Strength_Spearman_rho = round(sapply(valid_results, function(x) x$estimate), 3),
+  Sig_level = format.pval(sapply(valid_results, function(x) x$p.value), digits = 3, eps = 0.001)
+)
+
+#
+# 4 Export to LaTeX (.tex)
+# 
+
+library(kableExtra)
+
+table3_tex <- table3 %>%
+  kable(
+    format = "latex",
+    booktabs = TRUE,
+    caption = "Table 3. Independent Spearman’s rho correlations between food insecurity and socio-economic factors in SSA countries (n = 49,137).",
+    col.names = c("Variable", "Strength (Spearman’s $\\rho$)", "Sig. level"),
+    align = "lcc",
+    digits = 3,
+    escape = FALSE
+  ) %>%
+  kable_styling(latex_options = c("hold_position", "striped", "scale_down"))
+
+# Save LaTeX table
+writeLines(table3_tex, "table3_spearman.tex")
+
+table3
+
+
+```
+
+
+
+# Replicating the Unadjusted Multinomial model
+
+```{r, multinom1, message=FALSE, warning=FALSE}
+
+Afr_roun6_with_GDP <- Afr_roun6_with_GDP %>%
+  mutate(
+    food.insecurity   = relevel(food.insecurity, ref = "Always"),
+    water.insecurity  = relevel(water.insecurity, ref = "Always"),
+    gender            = relevel(gender, ref = "Male"),
+    age_group         = relevel(age_group, ref = "66 and over"),
+    urban_rural       = relevel(urban_rural, ref = "Urban"),
+    employment        = relevel(employment, ref = "Employed part-time"),
+    income_available  = relevel(income_available, ref = "Never"), 
+    electricity       =  relevel(electricity, ref = "Has electricity"),
+    asset_ownership   = relevel(asset_ownership, ref = "Owns all 4"),
+    education         = relevel(education, ref = "Post-secondary")
+  )
+
+# 
+# 2 Run unadjusted multinomial models
+#
+model.water       <- multinom(food.insecurity ~ water.insecurity, data = Afr_roun6_with_GDP)
+model.gender      <- multinom(food.insecurity ~ gender, data = Afr_roun6_with_GDP)
+model.age         <- multinom(food.insecurity ~ age_group, data = Afr_roun6_with_GDP)
+model.area        <- multinom(food.insecurity ~ urban_rural, data = Afr_roun6_with_GDP)
+model.employ      <- multinom(food.insecurity ~ employment, data = Afr_roun6_with_GDP)
+model.income      <- multinom(food.insecurity ~ income_available, data = Afr_roun6_with_GDP)
+model.asset       <- multinom(food.insecurity ~ asset_ownership, data = Afr_roun6_with_GDP)
+model.education   <- multinom(food.insecurity ~ education, data = Afr_roun6_with_GDP)
+model.electricity <- multinom(food.insecurity ~ electricity, data = Afr_roun6_with_GDP)
+
+# 
+# 3 Define safe extract_table() function
+# 
+extract_table <- function(model, varname) {
+  df <- tidy(model, exponentiate = TRUE, conf.int = TRUE) %>%
+    filter(term != "(Intercept)") %>%
+    mutate(
+      or_ci = paste0(
+        round(estimate, 3), " (",
+        round(conf.low, 3), "–",
+        round(conf.high, 3), ")"
+      )
+    ) %>%
+    dplyr::select(y.level, term, or_ci) %>%
+    pivot_wider(names_from = y.level, values_from = or_ci) %>%
+    rename(Category = term) %>%
+    mutate(Variable = varname)
+
+  # Ensure all outcome columns exist
+  expected_cols <- c("Never", "Just once or twice", "Several times", "Many times")
+  for (col in expected_cols) {
+    if (!col %in% names(df)) df[[col]] <- NA_character_
+  }
+
+  df %>%
+    dplyr::select(Variable, Category, all_of(expected_cols))
+}
+
+
+
+
+# 
+# 4. Combine all model outputs
+# 
+table4_df <- bind_rows(
+  extract_table(model.water,       "Water insecurity"),
+  extract_table(model.gender,      "Gender"),
+  extract_table(model.age,         "Age group"),
+  extract_table(model.area,        "Area of residence"),
+  extract_table(model.employ,      "Employment"),
+  extract_table(model.income,      "Income availability"),
+  extract_table(model.asset,       "Asset ownership"),
+  extract_table(model.education,   "Education"),
+  extract_table(model.electricity, "Electricity access")
+)
+
+
+
+# 
+# Clean up Category labels (Electricity fix included)
+# 
+table4_df <- table4_df %>%
+  mutate(
+    Category = case_when(
+      grepl("water\\.insecurity", Category)     ~ str_remove(Category, "water\\.insecurity"),
+      grepl("gender", Category)                 ~ str_remove(Category, "gender"),
+      grepl("age_group", Category)              ~ str_remove(Category, "age_group"),
+      grepl("urban_rural", Category)            ~ str_remove(Category, "urban_rural"),
+      grepl("employment", Category)             ~ str_remove(Category, "employment"),
+      grepl("income_available", Category)       ~ str_remove(Category, "income_available"),
+      grepl("asset_ownership", Category)        ~ str_remove(Category, "asset_ownership"),
+      grepl("education", Category)              ~ str_remove(Category, "education"),
+      grepl("electricity", Category)            ~ str_remove(Category, "electricity"),
+      TRUE                                     ~ Category
+    ),
+    # Replace underscores and dots with spaces
+    Category = gsub("_", " ", Category),
+    Category = gsub("\\.", " ", Category),
+    Category = gsub("\\s+", " ", Category),
+    Category = str_trim(Category),
+    # Capitalize words properly
+    Category = str_to_title(Category)
+  )
+
+
+
+# 
+# 5️ Generate LaTeX Table (grouped and formatted)
+# 
+table4_tex <- table4_df %>%
+  kbl(
+    format = "latex",
+    booktabs = TRUE,
+    escape = FALSE,
+    align = c("l", "l", "c", "c", "c", "c"),
+    caption = "Table 4. Unadjusted multinomial logistic regression analyses of Food Insecurity by socio-economic factors in SSA countries (n = 49,137)"
+  ) %>%
+  kable_styling(
+    latex_options = c("HOLD_position", "striped", "scale_down"),
+    full_width = FALSE,
+    font_size = 9
+  ) %>%
+  column_spec(1, bold = TRUE, width = "4cm") %>%
+  collapse_rows(columns = 1, valign = "top") %>%
+  add_header_above(c(" " = 2, "Odds Ratios (95% CI)" = 4)) %>%
+  add_header_above(c(" " = 2, "Food Insecurity Levels" = 4)) %>%
+  row_spec(0, bold = TRUE)
+
+
+
+
+
+# 
+# Save LaTeX output to .tex file
+# 
+writeLines(table4_tex, "Table4_Unadjusted_Multinomial2.tex")
+table4_df
+```
+
+#Now replicating adjusted 
+
+```{r,adjusted, message=FALSE, warning=FALSE} 
+# 
+# 1️ Fit Adjusted Multinomial Model
+# 
+model.adjusted <- multinom(
+  food.insecurity ~ water.insecurity + gender + age_group + urban_rural + employment + electricity,
+  data = Afr_roun6_with_GDP,
+  trace = TRUE,
+  model = TRUE
+)
+
+# 
+# 2️ Safe extraction of ORs and CIs including Electricity
+#
+extract_table_safe <- function(model, model_label = "Adjusted model (controls + electricity)") {
+  tidy(model, exponentiate = TRUE, conf.int = TRUE) %>%
+    filter(term != "(Intercept)") %>%
+    mutate(
+      Variable = case_when(
+        grepl("water", term, ignore.case = TRUE) ~ "Water Insecurity",
+        grepl("gender", term, ignore.case = TRUE) ~ "Gender",
+        grepl("age_group", term, ignore.case = TRUE) ~ "Age Group",
+        grepl("urban_rural", term, ignore.case = TRUE) ~ "Urban/Rural",
+        grepl("employment", term, ignore.case = TRUE) ~ "Employment",
+        grepl("electricity", term, ignore.case = TRUE) ~ "Electricity Access",
+        TRUE ~ term
+      ),
+      Category = term %>%
+        str_remove(".*?\\.") %>%
+        str_replace_all("_", " ") %>%
+        str_replace_all("–", "--") %>%
+        str_to_title() %>%
+        str_trim(),
+      OR_CI = sprintf("%.3f (%.3f--%.3f)", estimate, conf.low, conf.high)
+    ) %>%
+    dplyr::select(y.level, Variable, Category, OR_CI) %>%
+    pivot_wider(names_from = y.level, values_from = OR_CI) %>%
+    relocate(Variable, Category)
+}
+
+table5_safe <- extract_table_safe(model.adjusted)
+
+# 
+# 3️ Model fit statistics (for reference line)
+# 
+
+null_model <- multinom(food.insecurity ~ 1, data = Afr_roun6_with_GDP)
+
+ll_full <- as.numeric(logLik(model.adjusted))
+ll_null <- as.numeric(logLik(null_model))
+minus2LL <- -2 * ll_full
+chi_sq <- -2 * (ll_null - ll_full)
+
+df_diff <- attr(logLik(model.adjusted), "df") - attr(logLik(null_model), "df")
+p_value <- pchisq(chi_sq, df = df_diff, lower.tail = FALSE)
+pseudoR2 <- DescTools::PseudoR2(model.adjusted, which = c("CoxSnell", "Nagelkerke", "McFadden"))
+AIC_val <- AIC(model.adjusted)
+BIC_val <- BIC(model.adjusted)
+
+# 
+# 4 Generate LaTeX Table (main table only)
+#
+table5_tex_main <- table5_safe %>%
+  kbl(
+    "latex",
+    booktabs = TRUE,
+    escape = FALSE,
+    align = "lcccccc",
+    caption = "Table 5. Adjusted multinomial logistic regression analyses between water insecurity and food insecurity by controlling for gender, age, area of residence, employment, and electricity in sub-Saharan Africa (n = 49,137)"
+  ) %>%
+  kable_styling(
+    latex_options = c("striped", "hold_position", "scale_down")
+  ) %>%
+  collapse_rows(columns = 1:2, valign = "top")
+
+#
+# 5. Create Reference Line (model statistics)
+# 
+model_stats_line <- sprintf(
+  "\\textit{Reference:} -2 Log Likelihood (Full Model): %.3f; Likelihood Ratio Chi-square: %.3f, df = %d, p = %.4g; Pseudo R-squared (CoxSnell / Nagelkerke / McFadden): %.3f / %.3f / %.3f; AIC = %.3f; BIC = %.3f",
+  minus2LL, chi_sq, df_diff, p_value,
+  pseudoR2["CoxSnell"], pseudoR2["Nagelkerke"], pseudoR2["McFadden"],
+  AIC_val, BIC_val
+)
+
+# 
+# 6 Export to .tex file
+#
+cat(
+  table5_tex_main,
+  "\n", model_stats_line,
+  "\n\\end{table}",
+  file = "Table5_Adjusted_Multinomial_withElectricity_AICBIC.tex"
+)
+table5_safe
+model_stats_line
+```
+
+
+
+
+## I am suggesting that we should actualy run an ordinal logistic regression  
+
+
+```{r, mineh, message=FALSE, warning=FALSE}
+# Create a new data frame with the original (uncleaned) variables
+ 
+
+# 1. Data Preparation
+#
+library(dplyr)
+
+ord_reg_data <- Afr_roun6_with_GDP[, c(
+  "ISO3", "URBRUR", "Q101", "Q1", "Q97", "Q95", "X2018",
+  "Q8A", "Q8B", "Q8E", "asset_ownership", "EA_SVC_A"
+)]
+
+colnames(ord_reg_data) <- c(
+  "Countrycode", "Area_of_Residence", "Gender", "Age",
+  "Education", "Employment", "GDP_PPP",
+  "Food_Insecurity", "Water_Insecurity",
+  "Income_Insecurity", "Asset_Ownership", "Electricity_access"
+)
+
+ord_reg_data <- ord_reg_data %>%
+  mutate(
+    # Area of Residence
+    Area_of_Residence = case_when(
+      Area_of_Residence %in% c(1, 3, 460) ~ 0,
+      Area_of_Residence == 2 ~ 1,
+      TRUE ~ NA_real_
+    ),
+    Area_of_Residence = factor(Area_of_Residence, levels = c(0, 1), labels = c("Urban", "Rural")),
+
+    # Gender
+    Gender = case_when(
+      Gender == 1 ~ 0,
+      Gender == 2 ~ 1,
+      TRUE ~ NA_real_
+    ),
+    Gender = factor(Gender, levels = c(0, 1), labels = c("Male", "Female")),
+
+    # Age
+    Age = case_when(
+      Age %in% c(-1, 998, 999) ~ NA_real_,
+      Age >= 18 & Age <= 105 ~ as.numeric(Age),
+      TRUE ~ NA_real_
+    ),
+
+    # Education
+    Education = case_when(
+      Education %in% c(-1, 98, 99) ~ NA_real_,
+      Education %in% 0:9 ~ Education + 1,
+      TRUE ~ NA_real_
+    ),
+
+    # Employment
+    Employment = case_when(
+      Employment %in% c(-1, 9, 98) ~ NA_real_,
+      Employment == 2 ~ 2,
+      Employment %in% c(0, 1) ~ 1,
+      Employment == 3 ~ 3,
+      TRUE ~ NA_real_
+    ),
+    Employment = factor(Employment, levels = 1:3,
+                        labels = c("Unemployed", "Employed part-time", "Employed full-time")),
+    Employment = relevel(Employment, ref = "Employed full-time"),
+
+    # Electricity access (ref = "No electricity")
+    Electricity_access = case_when(
+      Electricity_access %in% c(-1, 9) ~ NA_real_,
+      Electricity_access == 0 ~ 0,
+      Electricity_access == 1 ~ 1,
+      TRUE ~ NA_real_
+    ),
+    Electricity_access = factor(Electricity_access,
+                                levels = c(0, 1),
+                                labels = c("No electricity", "Has electricity")),
+    Electricity_access = relevel(Electricity_access, ref = "Has electricity"),
+
+    # Food Insecurity (ordinal outcome)
+    Food_Insecurity = case_when(
+      Food_Insecurity %in% c(-1, 9, 98) ~ NA_real_,
+      Food_Insecurity %in% 0:4 ~ Food_Insecurity + 1,
+      TRUE ~ NA_real_
+    ),
+    Food_Insecurity = factor(Food_Insecurity, levels = 1:5,
+                             labels = c("Never", "Once or twice", "Several times", "Many times", "Always"),
+                             ordered = TRUE),
+
+    # Water, Income, and Assets
+    Water_Insecurity = ifelse(Water_Insecurity %in% c(-1, 9, 98), NA, Water_Insecurity + 1),
+    Income_Insecurity = ifelse(Income_Insecurity %in% c(-1, 9, 98), NA, Income_Insecurity + 1),
+    Asset_Ownership = case_when(
+      Asset_Ownership == "Owns none"  ~ 0,
+      Asset_Ownership == "Owns 1"     ~ 1,
+      Asset_Ownership == "Owns 2"     ~ 2,
+      Asset_Ownership == "Owns 3"     ~ 3,
+      Asset_Ownership == "Owns all 4" ~ 4,
+      TRUE ~ NA_real_
+    ),
+    GDP_PPP = as.numeric(GDP_PPP),
+
+    # GDP group
+    GDP_PPP_Group = case_when(
+      GDP_PPP < 1000 ~ 1,
+      GDP_PPP < 2000 ~ 2,
+      GDP_PPP < 3000 ~ 3,
+      GDP_PPP < 4000 ~ 4,
+      GDP_PPP >= 4000 ~ 5,
+      TRUE ~ NA_real_
+    ),
+    GDP_PPP_Group = factor(GDP_PPP_Group, levels = 1:5,
+                           labels = c("GDP PPP (< $1,000)",
+                                      "GDP PPP ($1,000–$1,999)",
+                                      "GDP PPP ($2,000–$2,999)",
+                                      "GDP PPP ($3,000–$3,999)",
+                                      "GDP PPP ($4,000 and more)")),
+    GDP_PPP_Group = relevel(GDP_PPP_Group, ref = "GDP PPP ($4,000 and more)")
+  )
+
+
+# 
+# 2. Ordinal Model
+#
+model_ordinal <- polr(
+  Food_Insecurity ~ Water_Insecurity + Gender + Area_of_Residence + Age +
+    Employment + Income_Insecurity + Education + Asset_Ownership + Electricity_access + GDP_PPP_Group,
+  data = ord_reg_data,
+  Hess = TRUE
+)
+
+
+
+
+# 
+# 3 Extract Coefficients, OR, and 95% CIs
+# 
+coefs <- coef(summary(model_ordinal))
+coefs_predictors <- coefs[!grepl("\\|", rownames(coefs)), , drop = FALSE]
+ci <- confint(model_ordinal)
+OR <- exp(coef(model_ordinal))
+ci_OR <- exp(ci)  # to our match predictor names only
+
+#  Clean variable names for readability
+
+clean_var_names <- names(OR)
+
+clean_var_names <- clean_var_names %>%
+  gsub("Water_Insecurity", "Water insecurity", .) %>%
+  gsub("GenderFemale", "Female (vs Male)", .) %>%
+  gsub("Area_of_ResidenceRural", "Rural (vs Urban)", .) %>%
+  gsub("Age", "Age (years)", .) %>%
+  gsub("Education", "Education level", .) %>%
+  gsub("EmploymentUnemployed", "Unemployed (vs full-time)", .) %>%
+  gsub("EmploymentEmployed part-time", "Part-time employed (vs full-time)", .) %>%
+  gsub("Income_Insecurity", "Income insecurity", .) %>%
+  gsub("Asset_Ownership", "Asset ownership", .) %>%
+  gsub("Electricity_accessHas electricity", "Has electricity (vs no access)", .) %>%
+  gsub("GDP_PPP_GroupGDP PPP \\(< \\$1,000\\)", "GDP < $1,000", .) %>%
+  gsub("GDP_PPP_GroupGDP PPP \\(\\$1,000–\\$1,999\\)", "GDP $1,000–$1,999", .) %>%
+  gsub("GDP_PPP_GroupGDP PPP \\(\\$2,000–\\$2,999\\)", "GDP $2,000–$2,999", .) %>%
+  gsub("GDP_PPP_GroupGDP PPP \\(\\$3,000–\\$3,999\\)", "GDP $3,000–$3,999", .)
+
+
+
+results_table <- data.frame(
+  Variable = clean_var_names,
+  Coefficient = round(coefs_predictors[, "Value"], 3),
+  OR = round(OR, 3),
+  CI_lower = round(ci_OR[, 1], 3),
+  CI_upper = round(ci_OR[, 2], 3)
+)
+
+
+# 
+# 9. Cutpoints
+#
+cutpoints <- coefs[grepl("\\|", rownames(coefs)), , drop = FALSE]
+cutpoints_table <- data.frame(
+  Threshold = rownames(cutpoints),
+  Estimate = round(cutpoints[, "Value"], 3)
+)
+
+#
+# 5️ Model Stats (with BIC added, no logLik)
+# 
+AIC_val <- AIC(model_ordinal)
+BIC_val <- BIC(model_ordinal)
+n_obs <- nobs(model_ordinal)
+df_model <- attr(logLik(model_ordinal), "df")
+logLik.val <- logLik(model_ordinal)
+# Null model for pseudo R²
+model_null <- update(model_ordinal, . ~ 1)
+
+pseudo_r2_mcfadden <- 1 - (as.numeric(logLik(model_ordinal)) / as.numeric(logLik(model_null)))
+pseudo_r2_coxsnell <- 1 - exp((2 / n_obs) * (as.numeric(logLik(model_null)) - as.numeric(logLik(model_ordinal))))
+pseudo_r2_nagelkerke <- pseudo_r2_coxsnell / (1 - exp(2 * as.numeric(logLik(model_null)) / n_obs))
+
+model_stats_line <- sprintf(
+  "\\textit{Model statistics:} AIC = %.2f; BIC = %.2f; logLik = %.2f; N = %d; df = %d; \\\\ Pseudo R$^2$ (McFadden / Cox-Snell / Nagelkerke) = %.3f / %.3f / %.3f",
+  AIC_val, BIC_val, logLik.val, n_obs, df_model,
+  pseudo_r2_mcfadden, pseudo_r2_coxsnell, pseudo_r2_nagelkerke
+)
+
+
+
+
+# 
+# 6. Create LaTeX Table for Model Results
+# 
+table_tex_main <- results_table %>%
+  dplyr::select(Variable, Coefficient, OR, CI_lower, CI_upper) %>%
+  kbl(
+    format = "latex",
+    booktabs = TRUE,
+    align = "lcccc",
+    caption = "Table X. Ordinal logistic regression (POLR) results for determinants of food insecurity in Sub-Saharan Africa (n = 49,137)",
+    escape = FALSE
+  ) %>%
+  kable_styling(latex_options = c("striped", "hold_position", "scale_down")) %>%
+  footnote(
+    general = model_stats_line,
+    general_title = "",
+    escape = FALSE
+  )
+
+#
+# 7️. Create Cutpoints Table
+# 
+cutpoints_tex <- cutpoints_table %>%
+  kbl(
+    format = "latex",
+    booktabs = TRUE,
+    caption = "Cutpoints (Thresholds) for Food Insecurity Categories",
+    align = "lc",
+    escape = FALSE
+  ) %>%
+  kable_styling(latex_options = c("hold_position"))
+
+# 
+# 8️. Save Both Tables to a .tex File
+# 
+writeLines(
+  c(as.character(table_tex_main), "\n\n", as.character(cutpoints_tex)),
+  "Tab_Ord_Mod.tex"
+)
+
+results_table
+model_stats_line
+```
+
